@@ -6,8 +6,9 @@ const { splitCommand, analyzeNodeProject } = require('./package.service');
 const { ecosystemPath, ensureEcosystemConfig, startOrRestart } = require('./pm2.service');
 const { installSite, testAndReload } = require('./nginx.service');
 const { nginxBackTemplate } = require('../templates/nginx.back.template');
-const { runCertbot } = require('./certbot.service');
+const { runCertbot, certificateExists } = require('./certbot.service');
 const { writeDeployConfig } = require('./deploy-config.service');
+const { warnIfDnsMismatch } = require('./dns.service');
 
 async function continueBackPending(runner, config, state) {
   const projectPath = config.projectPath || config.projectDir;
@@ -62,8 +63,15 @@ async function updateProject(runner, config, state) {
     ? path.join(config.projectPath, config.backendPath)
     : config.projectPath;
   const analysis = await analyzeNodeProject(analysisPath);
-  if (analysis.scripts.build && config.buildCommand) {
-    const shouldBuild = config.type === 'front' || config.type === 'fullstack' || commandSeemsBuildRequired(config.startCommand);
+  if (config.type === 'back' || config.type === 'fullstack') {
+    await ensureBuildBeforePm2(runner, config, {
+      projectPath: analysisPath,
+      state,
+      analysis,
+      promptWhenOptional: true
+    });
+  } else if (analysis.scripts.build && config.buildCommand) {
+    const shouldBuild = config.type === 'front';
     const { build } = await inquirer.prompt([
       { type: 'confirm', name: 'build', message: 'Ejecutar build?', default: shouldBuild }
     ]);
@@ -100,6 +108,7 @@ async function updateProject(runner, config, state) {
 
 async function repairBackProject(runner, config, state, options = {}) {
   const projectPath = config.projectPath;
+  const analysis = state.packageJson ? await analyzeNodeProject(projectPath) : { scripts: {} };
   if (state.ecosystemJs && state.typeModule) {
     const oldPath = path.join(projectPath, 'ecosystem.config.js');
     const newPath = ecosystemPath(projectPath);
@@ -141,6 +150,13 @@ async function repairBackProject(runner, config, state, options = {}) {
         { type: 'confirm', name: 'restart', message: 'Iniciar o reiniciar PM2?', default: true }
       ])).restart;
     if (shouldRestart) {
+      const buildReady = await ensureBuildBeforePm2(runner, config, {
+        projectPath,
+        state,
+        analysis,
+        promptWhenOptional: false
+      });
+      if (!buildReady) return;
       await startOrRestart(runner, projectPath, config.pm2Name || config.appName, ecosystemPath(projectPath));
     }
   }
@@ -165,6 +181,8 @@ async function repairBackProject(runner, config, state, options = {}) {
   if (config.sslEnabled && config.domain && state.ssl !== 'si') {
     await runCertbot(runner, config.domain, false);
   }
+
+  await maybeOfferSslActivation(runner, config, state);
 
   if (!runner.dryRun) {
     await writeDeployConfig(projectPath, {
@@ -205,7 +223,148 @@ async function runCommand(runner, command, cwd, message) {
 }
 
 function commandSeemsBuildRequired(command) {
-  return /(dist\/|build\/|server\.cjs|server\.js)/.test(String(command || ''));
+  return /(dist\/|build\/|server\.cjs|(^|\s|["'])server\.js|main\.js)/.test(String(command || ''));
+}
+
+function startDependsOnBuild(startCommand, scripts = {}) {
+  if (commandSeemsBuildRequired(startCommand)) return true;
+  const command = String(startCommand || '').trim();
+  if (command === 'npm start') return commandSeemsBuildRequired(scripts.start);
+  const npmRun = command.match(/^npm\s+run\s+([\w:-]+)/);
+  if (npmRun) return commandSeemsBuildRequired(scripts[npmRun[1]]);
+  return false;
+}
+
+function shouldOfferSslActivation(config, state) {
+  return Boolean(
+    config.domain &&
+    !config.sslEnabled &&
+    state.nginxConfig &&
+    state.nginxEnabled &&
+    state.ssl !== 'si'
+  );
+}
+
+async function maybeOfferSslActivation(runner, config, state) {
+  if (!shouldOfferSslActivation(config, state)) return false;
+
+  const nginxOk = await validateNginxConfig(runner);
+  if (!nginxOk) {
+    logger.warn('Nginx no pasa nginx -t. No se activara SSL hasta corregir la configuracion.');
+    return false;
+  }
+
+  const dnsOk = await warnIfDnsMismatch(runner, config.domain);
+  if (!dnsOk) {
+    logger.warn('El dominio no parece apuntar a esta VPS. No se activara SSL automaticamente.');
+    return false;
+  }
+
+  const httpOk = await validateHttpPort80(runner, config.domain);
+  if (!httpOk) {
+    logger.warn(`No se pudo acceder a http://${config.domain} por puerto 80. No se activara SSL.`);
+    return false;
+  }
+
+  if (await certificateExists(runner, config.domain)) {
+    logger.warn(`Ya existe un certificado Certbot para ${config.domain}. No se creara duplicado.`);
+    return false;
+  }
+
+  const { enableSsl } = await inquirer.prompt([
+    {
+      type: 'confirm',
+      name: 'enableSsl',
+      message: `Nginx funciona por HTTP y SSL esta desactivado. Activar SSL con Certbot para ${config.domain}?`,
+      default: true
+    }
+  ]);
+  if (!enableSsl) return false;
+
+  await runner.sudo('certbot', ['--nginx', '-d', config.domain], {
+    message: 'Activando SSL con Certbot',
+    success: 'SSL configurado'
+  });
+  config.sslEnabled = true;
+  config.status = 'online';
+  state.ssl = 'si';
+  return true;
+}
+
+async function validateNginxConfig(runner) {
+  try {
+    await runner.sudo('nginx', ['-t'], {
+      spinner: false,
+      display: 'sudo nginx -t'
+    });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function validateHttpPort80(runner, domain) {
+  try {
+    await runner.run('curl', ['-I', '--max-time', '10', `http://${domain}`], {
+      spinner: false,
+      display: `curl -I --max-time 10 http://${domain}`,
+      timeout: 15000
+    });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function ensureBuildBeforePm2(runner, config, { projectPath, state, analysis, promptWhenOptional }) {
+  const scripts = analysis.scripts || {};
+  const buildCommand = config.buildCommand || (scripts.build ? 'npm run build' : '');
+  const required = startDependsOnBuild(config.startCommand || scripts.start, scripts);
+  const distExists = await fs.pathExists(path.join(projectPath, 'dist'));
+  const missingDist = state ? (!state.dist || !distExists) : !distExists;
+
+  if (!scripts.build || !buildCommand) return true;
+  if (!missingDist && !required && !promptWhenOptional) return true;
+
+  let shouldBuild = false;
+  if (missingDist && required) {
+    const { build } = await inquirer.prompt([
+      {
+        type: 'confirm',
+        name: 'build',
+        message: 'No existe dist y el start parece depender de dist/server.cjs. Ejecutar npm run build ahora?',
+        default: true
+      }
+    ]);
+    shouldBuild = build;
+    if (!shouldBuild) {
+      logger.warn('Build obligatorio rechazado. No se iniciara PM2 para evitar una app en errored.');
+      return false;
+    }
+  } else if (promptWhenOptional) {
+    const { build } = await inquirer.prompt([
+      { type: 'confirm', name: 'build', message: 'Ejecutar build antes de reiniciar PM2?', default: required }
+    ]);
+    shouldBuild = build;
+  }
+
+  if (!shouldBuild) return true;
+
+  try {
+    await runCommand(runner, buildCommand, projectPath, 'Ejecutando build antes de PM2');
+    if (state) state.dist = true;
+    return true;
+  } catch (error) {
+    if (!runner.dryRun) {
+      await writeDeployConfig(config.projectPath || projectPath, {
+        ...config,
+        status: 'partial',
+        lastStep: 'build',
+        lastError: error.message
+      });
+    }
+    throw error;
+  }
 }
 
 module.exports = {
@@ -213,5 +372,9 @@ module.exports = {
   updateProject,
   repairBackProject,
   runCommand,
-  commandSeemsBuildRequired
+  commandSeemsBuildRequired,
+  startDependsOnBuild,
+  ensureBuildBeforePm2,
+  shouldOfferSslActivation,
+  maybeOfferSslActivation
 };

@@ -91,6 +91,10 @@ Si no pasas nombre de app, la CLI lista apps detectadas en `/home/<usuario>/apps
 
 `deploy-app repair` permite regenerar `ecosystem.config.cjs`, renombrar `ecosystem.config.js` a `.cjs` en proyectos `"type": "module"`, reparar Nginx, activar symlink, validar Nginx y reiniciar PM2.
 
+En apps backend, `repair` y `update` validan antes de PM2 si falta `dist` y el `start` depende de salida compilada como `dist/server.cjs`, `server.cjs` o `build/`. Si hay script `build`, preguntan si ejecutar `npm run build` con default `si`; si el build parece obligatorio y se rechaza, PM2 no se inicia para evitar dejar la app en `errored`.
+
+Si `repair` detecta que Nginx existe, la app responde por HTTP y `sslEnabled` esta en `false`, pregunta si quieres activar SSL con Certbot. Antes valida DNS contra la IP publica de la VPS, `sudo nginx -t`, acceso por puerto 80 y que no exista ya un certificado para ese dominio. Si Certbot termina correctamente, actualiza `.jc-deploy.json` con `sslEnabled: true` y `status: "online"`.
+
 `deploy-app logs` muestra `pm2 status` y los ultimos logs de la app.
 
 `deploy-app import` registra apps existentes que no fueron creadas originalmente por jc-deploy. Busca candidatos en `/home/<usuario>/apps`, metadata existente, repos Git, `package.json`, procesos PM2 y configuraciones Nginx. `/var/www` se usa solo como pista secundaria porque normalmente contiene builds estaticos, no codigo fuente.
@@ -137,6 +141,7 @@ Antes de clonar, jc-deploy ejecuta `git ls-remote <repoUrl>` con timeout. Para U
 - instala dependencias
 - si existe `scripts.build`, pregunta si debe ejecutar build antes de PM2, con default `si`
 - si el start apunta a `dist/`, `build/`, `server.cjs` o `server.js`, avisa que el build parece obligatorio
+- en `repair` y `update`, si falta `dist` y el start depende de `dist/server.cjs`, ejecuta build antes de PM2 o detiene PM2 si el usuario rechaza
 - crea `.env` desde `.env.example` si lo confirmas
 - crea `ecosystem.config.cjs` si no existe, compatible con proyectos `"type": "module"`
 - inicia o reinicia PM2
