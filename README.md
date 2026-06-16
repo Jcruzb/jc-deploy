@@ -24,6 +24,15 @@ deploy-app back
 deploy-app fullstack
 ```
 
+El prompt de repo acepta HTTPS y SSH:
+
+```bash
+https://github.com/owner/repo.git
+https://github.com/owner/repo
+git@github.com:owner/repo.git
+git@github.com:owner/repo
+```
+
 Para revisar sin ejecutar cambios en la VPS:
 
 ```bash

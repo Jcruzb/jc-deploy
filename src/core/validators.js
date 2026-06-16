@@ -2,15 +2,44 @@ const path = require('path');
 
 function validateGithubUrl(value) {
   if (!value) return 'Introduce una URL de GitHub.';
-  return /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+(?:\.git)?$/.test(value.trim())
+  return parseGithubRepo(value)
     ? true
-    : 'La URL debe parecer https://github.com/owner/repo.git';
+    : 'La URL debe parecer https://github.com/owner/repo.git o git@github.com:owner/repo.git';
 }
 
 function repoNameFromUrl(value) {
-  const clean = value.trim().replace(/\/$/, '');
-  const name = clean.split('/').pop().replace(/\.git$/, '');
-  return sanitizeAppName(name);
+  const parsed = parseGithubRepo(value);
+  if (!parsed) return '';
+  return sanitizeAppName(parsed.repo);
+}
+
+function parseGithubRepo(value) {
+  const clean = String(value || '').trim().replace(/\/$/, '');
+  const httpsMatch = clean.match(/^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+?)(?:\.git)?$/);
+  if (httpsMatch) {
+    return {
+      protocol: 'https',
+      owner: httpsMatch[1],
+      repo: httpsMatch[2]
+    };
+  }
+
+  const sshMatch = clean.match(/^git@github\.com:([\w.-]+)\/([\w.-]+?)(?:\.git)?$/);
+  if (sshMatch) {
+    return {
+      protocol: 'ssh',
+      owner: sshMatch[1],
+      repo: sshMatch[2]
+    };
+  }
+
+  return null;
+}
+
+function suggestedSshUrl(value) {
+  const parsed = parseGithubRepo(value);
+  if (!parsed) return null;
+  return `git@github.com:${parsed.owner}/${parsed.repo}.git`;
 }
 
 function sanitizeAppName(value) {
@@ -50,6 +79,8 @@ function normalizeApiPath(value) {
 module.exports = {
   validateGithubUrl,
   repoNameFromUrl,
+  parseGithubRepo,
+  suggestedSshUrl,
   sanitizeAppName,
   validateAppName,
   validateDomain,

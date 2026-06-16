@@ -26,14 +26,17 @@ class Runner {
         stdio: options.stdio || 'pipe',
         cwd: options.cwd,
         env: options.env,
+        timeout: options.timeout,
         shell: false
       });
       if (spinner) spinner.succeed(options.success || 'Completado');
       return result;
     } catch (error) {
       if (spinner) spinner.fail(options.failure || 'Fallo el comando');
-      const detail = error.stderr || error.stdout || error.shortMessage || error.message;
-      throw new Error(`${display}\n${detail}`);
+      const output = [error.stderr, error.stdout].filter(Boolean).join('\n').trim();
+      const timeoutMessage = error.timedOut ? `El comando supero el timeout de ${options.timeout}ms.` : '';
+      const detail = output || error.shortMessage || error.message;
+      throw new Error(`${display}\n${[timeoutMessage, detail].filter(Boolean).join('\n')}`);
     }
   }
 
