@@ -64,9 +64,9 @@ async function startOrRestart(runner, projectDir, appName, ecosystemFile) {
   });
 }
 
-async function showLogs(runner, appName) {
+async function showLogs(runner, appName, lines = 50) {
   await runner.run('pm2', ['status'], { spinner: false, stdio: 'inherit' });
-  await runner.run('pm2', ['logs', appName, '--lines', '50'], { spinner: false, stdio: 'inherit' });
+  await runner.run('pm2', ['logs', appName, '--lines', String(lines)], { spinner: false, stdio: 'inherit' });
 }
 
 module.exports = {

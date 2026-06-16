@@ -26,12 +26,13 @@ deploy-app status
 deploy-app update
 deploy-app repair
 deploy-app logs
+deploy-app restart
 deploy-app doctor
 deploy-app preflight
 deploy-app import
 ```
 
-Al ejecutar solo `deploy-app`, el menu principal permite elegir entre nuevo despliegue, actualizar, reparar, ver estado, logs, importar una app existente, doctor o salir.
+Al ejecutar solo `deploy-app`, el menu principal permite elegir entre nuevo despliegue, actualizar, reparar, ver estado, logs, reiniciar una app existente, importar una app existente, doctor o salir.
 
 El prompt de repo acepta HTTPS y SSH:
 
@@ -69,6 +70,7 @@ deploy-app status cv_proexpress
 deploy-app update cv_proexpress
 deploy-app repair cv_proexpress
 deploy-app logs cv_proexpress
+deploy-app restart cv_proexpress
 deploy-app doctor
 deploy-app preflight cv_proexpress
 deploy-app import
@@ -96,6 +98,17 @@ En apps backend, `repair` y `update` validan antes de PM2 si falta `dist` y el `
 Si `repair` detecta que Nginx existe, la app responde por HTTP y `sslEnabled` esta en `false`, pregunta si quieres activar SSL con Certbot. Antes valida DNS contra la IP publica de la VPS, `sudo nginx -t`, acceso por puerto 80 y que no exista ya un certificado para ese dominio. Si Certbot termina correctamente, actualiza `.jc-deploy.json` con `sslEnabled: true` y `status: "online"`.
 
 `deploy-app logs` muestra `pm2 status` y los ultimos logs de la app.
+
+`deploy-app restart [appName]` reinicia una app PM2 despues de modificar `.env`:
+
+- usa metadata local para obtener `pm2Name`
+- ejecuta `pm2 restart <pm2Name> --update-env`
+- ejecuta `pm2 save`
+- no recarga Nginx por defecto
+- pregunta si quieres validar `sudo nginx -t`
+- pregunta si quieres recargar Nginx solo si modificaste configuracion
+- muestra `pm2 status` y logs recientes
+- actualiza `lastRestartAt`, `updatedAt` y `status`
 
 `deploy-app import` registra apps existentes que no fueron creadas originalmente por jc-deploy. Busca candidatos en `/home/<usuario>/apps`, metadata existente, repos Git, `package.json`, procesos PM2 y configuraciones Nginx. `/var/www` se usa solo como pista secundaria porque normalmente contiene builds estaticos, no codigo fuente.
 

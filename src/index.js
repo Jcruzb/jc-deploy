@@ -13,6 +13,7 @@ const { runLogs } = require('./commands/logs');
 const { runDoctor } = require('./commands/doctor');
 const { runPreflight } = require('./commands/preflight');
 const { runImport } = require('./commands/import');
+const { runRestart } = require('./commands/restart');
 
 const program = new Command();
 
@@ -63,6 +64,12 @@ program
   .action((appName) => runLogs(appName));
 
 program
+  .command('restart [appName]')
+  .description('Reiniciar una app PM2 despues de modificar .env')
+  .option('--dry-run', 'show what would be executed without changing the server')
+  .action((appName, options) => runRestart(appName, { dryRun: Boolean(options.dryRun || program.opts().dryRun) }));
+
+program
   .command('doctor [appName]')
   .description('Revisar entorno general VPS y opcionalmente una app')
   .action((appName) => runDoctor(appName));
@@ -97,6 +104,7 @@ async function main() {
         { name: 'Reparar app existente', value: 'repair' },
         { name: 'Ver estado de una app', value: 'status' },
         { name: 'Ver logs', value: 'logs' },
+        { name: 'Reiniciar app existente', value: 'restart' },
         { name: 'Importar/registrar app existente', value: 'import' },
         { name: 'Doctor / revisar VPS', value: 'doctor' },
         { name: 'Salir', value: 'exit' }
@@ -131,6 +139,7 @@ async function main() {
   if (answer.action === 'repair') await runRepair(undefined, { dryRun });
   if (answer.action === 'status') await runStatus();
   if (answer.action === 'logs') await runLogs();
+  if (answer.action === 'restart') await runRestart(undefined, { dryRun });
   if (answer.action === 'import') await runImport({ dryRun });
   if (answer.action === 'doctor') await runDoctor();
 }

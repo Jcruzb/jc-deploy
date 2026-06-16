@@ -71,8 +71,45 @@ async function resolveApp(appName) {
   return apps.find((app) => app.projectPath === selected);
 }
 
+async function resolveRegisteredApp(appName) {
+  await markMissingApps();
+  const index = await readGlobalIndex();
+  const apps = [];
+  for (const entry of index.apps) {
+    if (!entry.projectPath || entry.status === 'missing') continue;
+    apps.push({
+      appName: entry.appName || path.basename(entry.projectPath),
+      projectPath: entry.projectPath,
+      config: await readDeployConfig(entry.projectPath),
+      source: 'index',
+      status: entry.status
+    });
+  }
+
+  if (appName) {
+    const found = apps.find((app) => app.appName === appName || path.basename(app.projectPath) === appName);
+    if (found) return found;
+    return resolveApp(appName);
+  }
+
+  if (!apps.length) throw new Error('No hay apps registradas en ~/.jc-deploy/apps.json.');
+  const { selected } = await inquirer.prompt([
+    {
+      type: 'list',
+      name: 'selected',
+      message: 'Selecciona una app registrada:',
+      choices: apps.map((app) => ({
+        name: `${app.appName} (${app.projectPath})`,
+        value: app.projectPath
+      }))
+    }
+  ]);
+  return apps.find((app) => app.projectPath === selected);
+}
+
 module.exports = {
   appsRoot,
   listDetectedApps,
-  resolveApp
+  resolveApp,
+  resolveRegisteredApp
 };
