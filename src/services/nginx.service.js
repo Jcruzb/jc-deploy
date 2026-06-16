@@ -40,6 +40,10 @@ async function installSite(runner, appName, configContent) {
   }
 
   await fs.writeFile(tmpFile, configContent, 'utf8');
+  const domains = extractServerNames(configContent);
+  for (const domain of domains) {
+    await warnIfDomainAppears(runner, domain);
+  }
 
   try {
     await runner.sudo('test', ['-f', available], {
@@ -65,6 +69,22 @@ async function installSite(runner, appName, configContent) {
   });
 }
 
+async function warnIfDomainAppears(runner, domain) {
+  try {
+    const result = await runner.sudo('grep', ['-R', domain, '/etc/nginx/sites-available', '/etc/nginx/sites-enabled'], {
+      spinner: false,
+      display: `sudo grep -R ${domain} /etc/nginx/sites-available /etc/nginx/sites-enabled`
+    });
+    if (result.stdout) logger.warn(`El dominio ${domain} aparece en otra configuracion Nginx.`);
+  } catch (_) {}
+}
+
+function extractServerNames(configContent) {
+  const match = String(configContent).match(/server_name\s+([^;]+);/);
+  if (!match) return [];
+  return match[1].split(/\s+/).filter(Boolean);
+}
+
 async function testAndReload(runner) {
   await runner.sudo('nginx', ['-t'], {
     message: 'Validando Nginx',
@@ -85,5 +105,6 @@ module.exports = {
   siteEnabledPath,
   installSite,
   testAndReload,
-  domainList
+  domainList,
+  extractServerNames
 };

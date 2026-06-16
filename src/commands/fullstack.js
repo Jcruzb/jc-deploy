@@ -14,6 +14,8 @@ const { ensureEcosystemConfig, startOrRestart } = require('../services/pm2.servi
 const { installSite, testAndReload } = require('../services/nginx.service');
 const { runCertbot } = require('../services/certbot.service');
 const { nginxFullstackTemplate } = require('../templates/nginx.fullstack.template');
+const { writeDeployConfig } = require('../services/deploy-config.service');
+const { ensureSudo, keepAlive, stopKeepAlive } = require('../services/sudo.service');
 
 async function runFullstackDeploy({ dryRun = false } = {}) {
   const deployRunner = new Runner({ dryRun });
@@ -99,7 +101,11 @@ async function runFullstackDeploy({ dryRun = false } = {}) {
 
   await ensureCommands(deployRunner, ['git', 'node', 'npm', 'rsync']);
   await ensurePm2(deployRunner);
-  if (config.configureNginx) await ensureCommands(deployRunner, ['nginx', 'systemctl']);
+  if (config.configureNginx || config.enableSsl) {
+    await ensureSudo(deployRunner);
+    keepAlive(deployRunner);
+    await ensureCommands(deployRunner, ['nginx', 'systemctl']);
+  }
   await ensureCertbotIfNeeded(deployRunner, config.enableSsl);
 
   await ensureProjectRepo(deployRunner, config.repoUrl, config.projectDir);
@@ -122,23 +128,50 @@ async function runFullstackDeploy({ dryRun = false } = {}) {
   await deployRunner.run(...commandTuple(config.backendInstallCommand), { cwd: backendDir, message: 'Instalando backend' });
   if (config.createBackendEnv && !dryRun) await createEnvFromExample(backendDir, true, '.env');
   if (config.createBackendEnv && dryRun) logger.warn('dry-run: creacion de .env backend omitida');
+  let ecosystemFile;
   if (!dryRun) {
-    await ensureEcosystemConfig(backendDir, {
+    ecosystemFile = await ensureEcosystemConfig(backendDir, {
       appName: config.pm2Name,
       cwd: backendDir,
       startCommand: config.backendStartCommand,
       port: config.port
     });
   } else {
-    logger.warn('dry-run: creacion de ecosystem.config.js omitida');
+    logger.warn('dry-run: creacion de ecosystem.config.cjs omitida');
   }
-  await startOrRestart(deployRunner, backendDir, config.pm2Name);
+  await startOrRestart(deployRunner, backendDir, config.pm2Name, ecosystemFile);
 
   if (config.configureNginx) {
     await installSite(deployRunner, config.appName, nginxFullstackTemplate(config));
     await testAndReload(deployRunner);
   }
   if (config.enableSsl) await runCertbot(deployRunner, config.domain, config.includeWww);
+  stopKeepAlive();
+  if (!dryRun) {
+    await writeDeployConfig(config.projectDir, {
+      appName: config.appName,
+      type: 'fullstack',
+      repoUrl: config.repoUrl,
+      projectPath: config.projectDir,
+      domain: config.domain,
+      includeWww: config.includeWww,
+      port: config.port,
+      pm2Name: config.pm2Name,
+      frontendPath: config.frontendPath,
+      backendPath: config.backendPath,
+      apiPath: config.apiPath,
+      frontendInstallCommand: config.frontendInstallCommand,
+      frontendBuildCommand: config.frontendBuildCommand,
+      frontendBuildOutputDir: config.frontendBuildOutputDir,
+      backendInstallCommand: config.backendInstallCommand,
+      startCommand: config.backendStartCommand,
+      ecosystemFile: 'ecosystem.config.cjs',
+      publicDir: config.publicDir,
+      nginxEnabled: Boolean(config.configureNginx),
+      nginxConfig: `/etc/nginx/sites-available/${config.appName}`,
+      sslEnabled: Boolean(config.enableSsl)
+    });
+  }
 
   logger.success('Deploy fullstack completado.');
 }

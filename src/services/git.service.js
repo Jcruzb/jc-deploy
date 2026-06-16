@@ -4,6 +4,7 @@ const os = require('os');
 const inquirer = require('inquirer');
 const { logger } = require('../core/logger');
 const { parseGithubRepo, suggestedSshUrl } = require('../core/validators');
+const { validateGithubSsh, validateRemoteExists } = require('./github-ssh.service');
 
 const GIT_CLONE_TIMEOUT = 60000;
 
@@ -13,6 +14,8 @@ function analysisDirFor(appName) {
 
 async function cloneForAnalysis(runner, repoUrl, appName) {
   const target = analysisDirFor(appName);
+  await validateGithubSsh(runner, repoUrl);
+  await validateRemoteExists(runner, repoUrl);
   if (await fs.pathExists(target)) {
     const { removeExisting } = await inquirer.prompt([
       {
@@ -43,6 +46,8 @@ async function ensureProjectRepo(runner, repoUrl, projectDir) {
 
   if (!(await fs.pathExists(projectDir))) {
     await fs.ensureDir(path.dirname(projectDir));
+    await validateGithubSsh(runner, repoUrl);
+    await validateRemoteExists(runner, repoUrl);
     await runGitClone(runner, ['clone', repoUrl, projectDir], repoUrl, {
       message: 'Clonando repo en carpeta definitiva',
       success: 'Repo clonada',

@@ -12,6 +12,8 @@ const { ensureCommands, ensureCertbotIfNeeded } = require('../services/preflight
 const { installSite, testAndReload } = require('../services/nginx.service');
 const { runCertbot } = require('../services/certbot.service');
 const { nginxFrontTemplate } = require('../templates/nginx.front.template');
+const { writeDeployConfig } = require('../services/deploy-config.service');
+const { ensureSudo, keepAlive, stopKeepAlive } = require('../services/sudo.service');
 
 async function runFrontDeploy({ dryRun = false } = {}) {
   const deployRunner = new Runner({ dryRun });
@@ -61,7 +63,11 @@ async function runFrontDeploy({ dryRun = false } = {}) {
   if (!confirmed) throw new Error('Despliegue cancelado por el usuario.');
 
   await ensureCommands(deployRunner, ['git', 'node', 'npm', 'rsync']);
-  if (config.configureNginx) await ensureCommands(deployRunner, ['nginx', 'systemctl']);
+  if (config.configureNginx || config.enableSsl) {
+    await ensureSudo(deployRunner);
+    keepAlive(deployRunner);
+    await ensureCommands(deployRunner, ['nginx', 'systemctl']);
+  }
   await ensureCertbotIfNeeded(deployRunner, config.enableSsl);
 
   await ensureProjectRepo(deployRunner, config.repoUrl, config.projectDir);
@@ -86,6 +92,24 @@ async function runFrontDeploy({ dryRun = false } = {}) {
     await testAndReload(deployRunner);
   }
   if (config.enableSsl) await runCertbot(deployRunner, config.domain, config.includeWww);
+  stopKeepAlive();
+  if (!dryRun) {
+    await writeDeployConfig(config.projectDir, {
+      appName: config.appName,
+      type: 'front',
+      repoUrl: config.repoUrl,
+      projectPath: config.projectDir,
+      domain: config.domain,
+      includeWww: config.includeWww,
+      installCommand: config.installCommand,
+      buildCommand: config.buildCommand,
+      buildOutputDir: config.buildOutputDir,
+      publicDir: config.publicDir,
+      nginxEnabled: Boolean(config.configureNginx),
+      nginxConfig: `/etc/nginx/sites-available/${config.appName}`,
+      sslEnabled: Boolean(config.enableSsl)
+    });
+  }
 
   logger.success('Deploy frontend completado.');
 }

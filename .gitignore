@@ -2,6 +2,7 @@ node_modules/
 npm-debug.log*
 .DS_Store
 coverage/
+test-fixtures-tmp/
 .env
 .env.*
 !.env.example

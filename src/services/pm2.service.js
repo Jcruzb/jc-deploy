@@ -1,11 +1,12 @@
 const path = require('path');
+const inquirer = require('inquirer');
 const { splitCommand } = require('./package.service');
 const { writeFileIfMissing } = require('./filesystem.service');
 const { pm2EcosystemTemplate } = require('../templates/pm2.ecosystem.template');
 const { logger } = require('../core/logger');
 
 function ecosystemPath(projectDir) {
-  return path.join(projectDir, 'ecosystem.config.js');
+  return path.join(projectDir, 'ecosystem.config.cjs');
 }
 
 function commandToPm2(command) {
@@ -25,14 +26,26 @@ async function ensureEcosystemConfig(projectDir, options) {
   return target;
 }
 
-async function startOrRestart(runner, projectDir, appName) {
-  const target = ecosystemPath(projectDir);
+async function startOrRestart(runner, projectDir, appName, ecosystemFile) {
+  const target = path.basename(ecosystemFile || ecosystemPath(projectDir));
   try {
     await runner.run('pm2', ['describe', appName], {
       cwd: projectDir,
       spinner: false,
       display: `pm2 describe ${appName}`
     });
+    const { restart } = await inquirer.prompt([
+      {
+        type: 'confirm',
+        name: 'restart',
+        message: `PM2 ya tiene un proceso llamado ${appName}. Reiniciarlo?`,
+        default: true
+      }
+    ]);
+    if (!restart) {
+      logger.warn('PM2 no fue reiniciado por decision del usuario.');
+      return;
+    }
     await runner.run('pm2', ['restart', appName], {
       cwd: projectDir,
       message: 'Reiniciando app con PM2',
@@ -58,6 +71,7 @@ async function showLogs(runner, appName) {
 
 module.exports = {
   commandToPm2,
+  ecosystemPath,
   ensureEcosystemConfig,
   startOrRestart,
   showLogs

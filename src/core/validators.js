@@ -42,6 +42,16 @@ function suggestedSshUrl(value) {
   return `git@github.com:${parsed.owner}/${parsed.repo}.git`;
 }
 
+function isGithubSshUrl(value) {
+  const parsed = parseGithubRepo(value);
+  return Boolean(parsed && parsed.protocol === 'ssh');
+}
+
+function isGithubHttpsUrl(value) {
+  const parsed = parseGithubRepo(value);
+  return Boolean(parsed && parsed.protocol === 'https');
+}
+
 function sanitizeAppName(value) {
   return String(value || '')
     .trim()
@@ -81,6 +91,8 @@ module.exports = {
   repoNameFromUrl,
   parseGithubRepo,
   suggestedSshUrl,
+  isGithubSshUrl,
+  isGithubHttpsUrl,
   sanitizeAppName,
   validateAppName,
   validateDomain,

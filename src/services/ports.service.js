@@ -33,8 +33,23 @@ function suggestFreePort(listeningLines, candidates = DEFAULT_PORTS) {
   return candidates.find((port) => !occupied.has(port)) || candidates[0];
 }
 
+function occupiedPortsFromLines(listeningLines) {
+  const occupied = new Set();
+  for (const line of listeningLines) {
+    const matches = line.matchAll(/:(\d+)\b/g);
+    for (const match of matches) occupied.add(Number(match[1]));
+  }
+  return occupied;
+}
+
+function isPortOccupied(listeningLines, port) {
+  return occupiedPortsFromLines(listeningLines).has(Number(port));
+}
+
 module.exports = {
   DEFAULT_PORTS,
   showListeningPorts,
-  suggestFreePort
+  suggestFreePort,
+  occupiedPortsFromLines,
+  isPortOccupied
 };
